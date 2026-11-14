@@ -117,7 +117,7 @@ final class Client
             'method' => 'GET',
             'timeout' => self::timeout(),
             'user-agent' => self::userAgent(),
-            'redirection' => 2,
+            'redirection' => 0,
             'headers' => ['Accept' => 'application/json'],
         ];
         $filtered = apply_filters('newsapi_pull_request_args', $args, $query->endpoint, $query->pull);
@@ -134,6 +134,11 @@ final class Client
         $args['headers'] = $headers;
         $args['sslverify'] = true;
         $args['method'] = 'GET';
+        // The key travels in a header that a redirect would carry to any host
+        // it names, so redirects are never followed. The body is read in memory.
+        $args['redirection'] = 0;
+        $args['stream'] = false;
+        unset($args['filename']);
         $args['timeout'] = min(60, max(5, isset($args['timeout']) && is_numeric($args['timeout']) ? (int) $args['timeout'] : 15));
         $url = self::url($query);
 

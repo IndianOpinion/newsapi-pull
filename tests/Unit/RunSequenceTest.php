@@ -102,6 +102,8 @@ final class RunSequenceTest extends TestCase
         $this->addPull();
         add_filter('newsapi_pull_request_args', static function (array $args): array {
             $args['sslverify'] = false;
+            $args['redirection'] = 5;
+            $args['stream'] = true;
             $args['headers']['X-Api-Key'] = 'stolen';
             return $args;
         });
@@ -110,6 +112,9 @@ final class RunSequenceTest extends TestCase
         $request = \WpStub::$requests[0];
         self::assertSame(self::KEY, $request['args']['headers']['X-Api-Key']);
         self::assertTrue($request['args']['sslverify']);
+        // A redirect would carry the key header to whatever host it names.
+        self::assertSame(0, $request['args']['redirection']);
+        self::assertFalse($request['args']['stream']);
         self::assertStringNotContainsString(self::KEY, $request['url']);
         self::assertStringStartsWith('https://newsapi.org/v2/top-headlines?', $request['url']);
     }

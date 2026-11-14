@@ -274,11 +274,15 @@ The PRD left these to the builder.
     endpoint documents. The look-back is at least one hour whatever a filter
     returns.
 21. **Notices** link to the settings page, where every fix is made.
-22. **Run state is written field by field.** At the end of a run only the
+22. **No redirects.** The client never follows a redirect, whatever
+    `newsapi_pull_request_args` says: the key travels in a header, and a
+    redirect would carry it to whatever host the redirect names. Streaming to
+    a file is turned off for the same reason the URL is fixed.
+23. **Run state is written field by field.** At the end of a run only the
     run's own state fields are written, after reading the pulls option again,
     so a pause, edit or delete made by an editor while the run was waiting on
     the API is not undone.
-23. **composer.lock** is not committed: the plugin has no runtime
+24. **composer.lock** is not committed: the plugin has no runtime
     dependencies, and CI resolves the dev tools per PHP version.
 
 ## Testing
