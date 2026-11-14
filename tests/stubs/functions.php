@@ -66,15 +66,45 @@ function did_action(string $hook): int
 
 // Options and transients -------------------------------------------------
 
+function wp_cache_get(string $key, string $group = ''): mixed
+{
+    return array_key_exists($key, WpStub::$cache[$group] ?? []) ? WpStub::$cache[$group][$key] : false;
+}
+
+function wp_cache_set(string $key, mixed $value, string $group = ''): bool
+{
+    WpStub::$cache[$group][$key] = $value;
+    return true;
+}
+
+function wp_cache_delete(string $key, string $group = ''): bool
+{
+    $had = array_key_exists($key, WpStub::$cache[$group] ?? []);
+    unset(WpStub::$cache[$group][$key]);
+    return $had;
+}
+
 function get_option(string $name, mixed $default = false): mixed
 {
-    return array_key_exists($name, WpStub::$options[WpStub::$blog] ?? []) ? WpStub::$options[WpStub::$blog][$name] : $default;
+    $exists = array_key_exists($name, WpStub::$options[WpStub::$blog] ?? []);
+    if (in_array($name, WpStub::$cachedOptions, true)) {
+        if (array_key_exists($name, WpStub::$cache['options'] ?? [])) {
+            return WpStub::$cache['options'][$name];
+        }
+        if ($exists) {
+            WpStub::$cache['options'][$name] = WpStub::$options[WpStub::$blog][$name];
+        }
+    }
+    return $exists ? WpStub::$options[WpStub::$blog][$name] : $default;
 }
 
 function update_option(string $name, mixed $value, mixed $autoload = null): bool
 {
     if (in_array($name, WpStub::$failWrites, true)) {
         return false;
+    }
+    if (in_array($name, WpStub::$cachedOptions, true)) {
+        WpStub::$cache['options'][$name] = $value;
     }
     $exists = array_key_exists($name, WpStub::$options[WpStub::$blog] ?? []);
     if ($exists && WpStub::$options[WpStub::$blog][$name] === $value) {

@@ -129,7 +129,8 @@ final class ErrorsTest extends TestCase
         $summary = $this->runPull();
         self::assertSame('db_error', $summary['reason']);
         self::assertSame(0, $summary['created']);
-        self::assertCount(1, $GLOBALS['wpdb']->queries);
+        $tableQueries = array_filter($GLOBALS['wpdb']->queries, static fn (string $q): bool => str_contains($q, 'newsapi_pull_seen'));
+        self::assertCount(1, $tableQueries);
         $errors = array_filter($this->logLines, static fn (string $l): bool => str_contains($l, 'De-duplication table query failed'));
         self::assertCount(1, $errors);
     }

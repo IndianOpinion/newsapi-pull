@@ -81,6 +81,9 @@ final class PullRepository
      */
     public function saveState(string $slug, array $state): void
     {
+        // A run writes its state minutes after it read the pulls. Read them
+        // again so an edit, pause or delete made meanwhile is not undone.
+        OptionCache::forget(self::OPTION);
         $rows = $this->load();
         if (!isset($rows[$slug])) {
             return;

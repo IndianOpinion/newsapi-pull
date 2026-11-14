@@ -8,8 +8,8 @@ use IndianOpinion\NewsApiPull\Exception\ApiException;
 use IndianOpinion\NewsApiPull\Exception\DatabaseException;
 use IndianOpinion\NewsApiPull\Exception\DuplicateKeyException;
 use IndianOpinion\NewsApiPull\Exception\InsertException;
+use IndianOpinion\NewsApiPull\Exception\MeterException;
 use IndianOpinion\NewsApiPull\Exception\NetworkException;
-use IndianOpinion\NewsApiPull\Exception\NewsApiPullException;
 use IndianOpinion\NewsApiPull\Exception\QuotaException;
 use IndianOpinion\NewsApiPull\Exception\ResponseException;
 
@@ -203,15 +203,19 @@ final class Runner
     private function execute(PullDefinition $pull, array &$summary, array $state, bool $manual, bool $dryRun, int $started): void
     {
         $plan = $this->settings->plan();
-        $client = ($this->clientFactory)($this->settings->apiKey(), function (Query $q) use (&$summary, $pull): void {
+        // The meter is checked and counted in one step just before each send,
+        // so a concurrent run or site cannot take the same last request.
+        $client = ($this->clientFactory)($this->settings->apiKey(), function (Query $q) use (&$summary, $pull, $manual): void {
+            $refusal = $q->endpoint === 'sources'
+                ? $this->meter->claim(true)
+                : $this->meter->claim($manual, $pull->slug, $pull->dailyCap);
+            if ($refusal !== null) {
+                throw new MeterException($refusal, $this->quotaMessage($refusal));
+            }
             $summary['requests']++;
-            $this->meter->count($q->endpoint === 'sources' ? null : $pull->slug);
         });
 
         $catalogueFetch = function () use ($client): array {
-            if ($this->meter->refusal(true) !== null) {
-                throw new NewsApiPullException('The quota meter has no room for the source catalogue.');
-            }
             return $client->sources(Query::sources())->sources;
         };
 
@@ -253,6 +257,15 @@ final class Runner
             $query = Query::forPull($pull, $page, $from, $languageSources);
             try {
                 $response = $pull->endpoint === 'headlines' ? $client->headlines($query) : $client->everything($query);
+            } catch (MeterException $e) {
+                if ($page === 1) {
+                    $summary['outcome'] = 'skipped';
+                    $summary['reason'] = $e->reason();
+                    $summary['message'] = $e->getMessage();
+                    return;
+                }
+                $summary['message'] = $e->getMessage() . ' Paging stopped early; drafts already made are kept.';
+                break;
             } catch (QuotaException $e) {
                 $this->meter->markExhausted('api');
                 if ($e->isRateLimit()) {
@@ -566,7 +579,10 @@ final class Runner
         unset($summary['disable']);
 
         if (!$noWrite && $pull !== null) {
-            $state = $this->pulls->state($pull->slug);
+            // Only the run's own fields are written, so an edit made while
+            // the run was in progress survives.
+            $previous = $this->pulls->state($pull->slug);
+            $state = [];
             $startedTs = (int) strtotime((string) $summary['started']);
             $state['last_run'] = $startedTs;
             $state['last_outcome'] = $outcome;
@@ -577,7 +593,7 @@ final class Runner
                 $state['last_success'] = $startedTs;
                 $state['failures'] = 0;
             } elseif (in_array($reason, self::FAILURE_REASONS, true)) {
-                $state['failures'] = (int) $state['failures'] + 1;
+                $state['failures'] = (int) $previous['failures'] + 1;
             }
             if (is_string($disable)) {
                 $state['disabled_reason'] = 'pull_invalid';

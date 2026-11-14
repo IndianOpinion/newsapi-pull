@@ -125,11 +125,16 @@ network-activated, per site otherwise.
 characters of a SHA-256 of a prefixed key, never the key). When the plugin is
 network-activated, the meter lives in one site option, so every site using
 the same key adds to one count. Activated per site, each site has its own
-meter. The run lock stays per site. Sites running at the same moment can each
-read the network meter before the other writes, so under real concurrency
-the shared count can trail by a request or two; the API's quota error remains
-the hard stop (lesson 10). The settings page says so on a multisite network
-without network activation.
+meter. The run lock stays per site, so the meter
+does not rely on it: every request is checked and counted in one step
+(`Meter::claim`) just before it is sent, under a MySQL named lock
+(`GET_LOCK`), and each meter read drops the process's cached copy of the
+option first. Two sites, or a run and an admin catalogue fetch, therefore
+cannot both take the last request, and a long run cannot write back a stale
+count over requests another process made meanwhile. If the named lock cannot
+be taken within 5 seconds the write goes ahead without it (fail open on
+bookkeeping); the API's quota error remains the hard stop (lesson 10). The
+settings page says so on a multisite network without network activation.
 
 ### R4. Credit wording
 
@@ -269,7 +274,11 @@ The PRD left these to the builder.
     endpoint documents. The look-back is at least one hour whatever a filter
     returns.
 21. **Notices** link to the settings page, where every fix is made.
-22. **composer.lock** is not committed: the plugin has no runtime
+22. **Run state is written field by field.** At the end of a run only the
+    run's own state fields are written, after reading the pulls option again,
+    so a pause, edit or delete made by an editor while the run was waiting on
+    the API is not undone.
+23. **composer.lock** is not committed: the plugin has no runtime
     dependencies, and CI resolves the dev tools per PHP version.
 
 ## Testing

@@ -50,6 +50,16 @@ final class WpStub
     public static bool $admin = true;
     public static string $home = 'https://my-site.test';
     public static string $tz = 'Europe/London';
+    /** @var array<string, array<string, mixed>> Object cache by group and key. */
+    public static array $cache = [];
+    /**
+     * Options whose reads go through the object cache, as WordPress does in
+     * one PHP process. Writes that bypass update_option (another process)
+     * are then invisible until the cache entry is deleted.
+     *
+     * @var list<string>
+     */
+    public static array $cachedOptions = [];
 
     public static function reset(): void
     {
@@ -79,6 +89,8 @@ final class WpStub
         self::$admin = true;
         self::$home = 'https://my-site.test';
         self::$tz = 'Europe/London';
+        self::$cache = [];
+        self::$cachedOptions = [];
         $GLOBALS['wpdb'] = new FakeWpdb();
     }
 
@@ -144,6 +156,12 @@ final class FakeWpdb
     public string $failOn = '';
     /** Report a duplicate-key error on the next INSERT regardless of content. */
     public bool $duplicateNext = false;
+    /** Named locks taken with GET_LOCK and not yet released. @var array<string, true> */
+    public array $locks = [];
+    /** Every GET_LOCK name requested, in order. @var list<string> */
+    public array $lockLog = [];
+    /** Make GET_LOCK time out. */
+    public bool $lockFails = false;
 
     public function get_charset_collate(): string
     {
@@ -258,6 +276,19 @@ final class FakeWpdb
     {
         if ($this->fail($sql)) {
             return null;
+        }
+        if (preg_match("/^SELECT GET_LOCK\\('([^']+)', \\d+\\)$/", $sql, $m)) {
+            $this->lockLog[] = $m[1];
+            if ($this->lockFails || isset($this->locks[$m[1]])) {
+                return '0';
+            }
+            $this->locks[$m[1]] = true;
+            return '1';
+        }
+        if (preg_match("/^SELECT RELEASE_LOCK\\('([^']+)'\\)$/", $sql, $m)) {
+            $had = isset($this->locks[$m[1]]);
+            unset($this->locks[$m[1]]);
+            return $had ? '1' : '0';
         }
         if (preg_match("/^SHOW TABLES LIKE '(.+)'$/", $sql, $m)) {
             $name = stripslashes(str_replace('\\_', '_', $m[1]));

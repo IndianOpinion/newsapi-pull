@@ -7,6 +7,7 @@ namespace IndianOpinion\NewsApiPull;
 use IndianOpinion\NewsApiPull\Admin\AdminPage;
 use IndianOpinion\NewsApiPull\Admin\PostsColumn;
 use IndianOpinion\NewsApiPull\Cli\Command;
+use IndianOpinion\NewsApiPull\Exception\MeterException;
 use IndianOpinion\NewsApiPull\Exception\NewsApiPullException;
 
 /**
@@ -147,11 +148,10 @@ final class Plugin
             return null;
         }
         return function (): array {
-            if ($this->meter->refusal(true) !== null) {
-                throw new NewsApiPullException('The quota meter has no room for the source catalogue.');
-            }
             $client = ($this->clientFactory)($this->settings->apiKey(), function (Query $q): void {
-                $this->meter->count(null);
+                if ($this->meter->claim(true) !== null) {
+                    throw new MeterException('quota', 'The quota meter has no room for the source catalogue.');
+                }
             });
             return $client->sources(Query::sources())->sources;
         };

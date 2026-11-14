@@ -191,4 +191,46 @@ final class QuotaMeterTest extends TestCase
         self::assertSame(2, $plugin->meter->day()['total']);
         self::assertSame('network', $plugin->meter->snapshot()['scope']);
     }
+
+    public function testMeterWriteKeepsCountsAnotherProcessWrote(): void
+    {
+        $this->configure();
+        \WpStub::$cachedOptions = [Meter::OPTION];
+        $this->plugin->meter->count('a');
+        // Another PHP process (another site on the network, or an admin
+        // catalogue fetch) counts four requests while this one holds a
+        // cached copy of the option.
+        $fp = $this->plugin->settings->keyFingerprint();
+        \WpStub::$options[1][Meter::OPTION][$fp][gmdate('Y-m-d', self::NOW)]['total'] = 5;
+        $this->plugin->meter->count('a');
+        self::assertSame(6, $this->plugin->meter->day()['total']);
+        self::assertSame([], $GLOBALS['wpdb']->locks, 'The meter lock is released after each write.');
+        self::assertNotSame([], $GLOBALS['wpdb']->lockLog);
+    }
+
+    public function testClaimRefusesWhenAnotherRunTookTheLastRequest(): void
+    {
+        $this->configure('paid', 'production', ['daily_limit' => 10, 'reserve' => 0]);
+        $this->addPull();
+        $this->setUsed(8);
+        // Between the pre-check and the send, a concurrent run takes the rest.
+        add_action('newsapi_pull_before_request', function (): void {
+            $this->setUsed(10);
+        });
+        $this->queueArticles([$this->article('https://a.example.com/1')]);
+        $summary = $this->runPull();
+        self::assertSame('skipped', $summary['outcome']);
+        self::assertSame('quota', $summary['reason']);
+        self::assertSame(0, $summary['requests']);
+        self::assertSame([], \WpStub::$requests);
+        self::assertSame(10, $this->plugin->meter->day()['total']);
+    }
+
+    public function testMeterWriteGoesAheadWhenTheLockTimesOut(): void
+    {
+        $this->configure();
+        $GLOBALS['wpdb']->lockFails = true;
+        self::assertNull($this->plugin->meter->claim(true, 'a'));
+        self::assertSame(1, $this->plugin->meter->day()['total']);
+    }
 }

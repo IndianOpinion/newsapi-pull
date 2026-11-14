@@ -6,6 +6,7 @@ namespace IndianOpinion\NewsApiPull\Tests\Unit;
 
 use IndianOpinion\NewsApiPull\Lock;
 use IndianOpinion\NewsApiPull\Meter;
+use IndianOpinion\NewsApiPull\PullRepository;
 use IndianOpinion\NewsApiPull\Tests\TestCase;
 
 final class RunSequenceTest extends TestCase
@@ -269,5 +270,24 @@ final class RunSequenceTest extends TestCase
         $summary = $this->runPull();
         self::assertSame(30, $summary['created']);
         self::assertSame(50, $summary['duplicates']);
+    }
+
+    public function testPauseMadeDuringARunSurvivesTheStateWrite(): void
+    {
+        $this->configure();
+        $this->addPull();
+        \WpStub::$cachedOptions = [PullRepository::OPTION];
+        $this->plugin->pulls->get('top');
+        // An editor pauses the pull from another request while this run waits on the API.
+        add_action('newsapi_pull_before_request', static function (): void {
+            \WpStub::$options[1][PullRepository::OPTION]['top']['definition']['paused'] = true;
+        });
+        $this->queueArticles([$this->article('https://a.example.com/1')]);
+        $summary = $this->runPull();
+        self::assertSame('ok', $summary['outcome']);
+        $pull = $this->plugin->pulls->get('top');
+        self::assertNotNull($pull);
+        self::assertTrue($pull->paused);
+        self::assertSame('ok', $this->plugin->pulls->state('top')['last_outcome']);
     }
 }

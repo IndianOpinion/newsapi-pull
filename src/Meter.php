@@ -10,6 +10,9 @@ namespace IndianOpinion\NewsApiPull;
  * Every request is counted before it is sent. Days are UTC calendar days.
  * The meter is scoped to the API key: per site, or once for the network when
  * the plugin is network-activated, so sites sharing a key share one count.
+ * Writes run under a MySQL named lock and always re-read the stored option,
+ * and claim() checks and counts in one step, so concurrent runs on different
+ * sites cannot both take the last request.
  */
 final class Meter
 {
@@ -65,7 +68,38 @@ final class Meter
      */
     public function refusal(bool $useReserve, ?string $pull = null, ?int $pullCap = null): ?string
     {
-        $day = $this->day();
+        return $this->refusalFor($this->day(), $useReserve, $pull, $pullCap);
+    }
+
+    /**
+     * Checks the meter and counts one request in a single step under the
+     * meter mutex, so two runs (or two sites sharing a network meter) cannot
+     * both take the last request. Returns null when the request was counted
+     * and may be sent, or the refusal reason when nothing was counted.
+     *
+     * A failed write does not refuse the request (fail open on bookkeeping).
+     */
+    public function claim(bool $useReserve, ?string $pull = null, ?int $pullCap = null): ?string
+    {
+        $refusal = null;
+        $this->mutate(function (array $day) use ($useReserve, $pull, $pullCap, &$refusal): array {
+            $refusal = $this->refusalFor($day, $useReserve, $pull, $pullCap);
+            if ($refusal !== null) {
+                return $day;
+            }
+            $day['total']++;
+            $slug = $pull ?? '_catalogue';
+            $day['pulls'][$slug] = ($day['pulls'][$slug] ?? 0) + 1;
+            return $day;
+        });
+        return $refusal;
+    }
+
+    /**
+     * @param array{total: int, pulls: array<string, int>, exhausted: bool, exhausted_source: string, api_remaining: int|null} $day
+     */
+    private function refusalFor(array $day, bool $useReserve, ?string $pull, ?int $pullCap): ?string
+    {
         if ($day['exhausted']) {
             return 'quota';
         }
@@ -186,25 +220,64 @@ final class Meter
      */
     private function mutate(callable $change): bool
     {
-        $all = $this->load();
-        $before = $all;
-        $fp = $this->settings->keyFingerprint();
-        $days = isset($all[$fp]) && is_array($all[$fp]) ? $all[$fp] : [];
-        $today = $this->today();
-        $day = self::normaliseDay(isset($days[$today]) && is_array($days[$today]) ? $days[$today] : []);
-        $days[$today] = $change($day);
-        $all[$fp] = $days;
-        $all = $this->prune($all);
-        if ($all === $before) {
-            return true;
+        $locked = $this->lock();
+        try {
+            $all = $this->load();
+            $before = $all;
+            $fp = $this->settings->keyFingerprint();
+            $days = isset($all[$fp]) && is_array($all[$fp]) ? $all[$fp] : [];
+            $today = $this->today();
+            $day = self::normaliseDay(isset($days[$today]) && is_array($days[$today]) ? $days[$today] : []);
+            $days[$today] = $change($day);
+            $all[$fp] = $days;
+            $all = $this->prune($all);
+            if ($all === $before) {
+                return true;
+            }
+            $ok = $this->network
+                ? update_site_option(self::OPTION, $all)
+                : update_option(self::OPTION, $all, false);
+            if (!$ok) {
+                $this->logger->warning('Quota meter write failed; the run continues and the API quota error stays the hard stop.');
+            }
+            return (bool) $ok;
+        } finally {
+            if ($locked !== null) {
+                $this->unlock($locked);
+            }
         }
-        $ok = $this->network
-            ? update_site_option(self::OPTION, $all)
-            : update_option(self::OPTION, $all, false);
-        if (!$ok) {
-            $this->logger->warning('Quota meter write failed; the run continues and the API quota error stays the hard stop.');
+    }
+
+    /**
+     * Takes a MySQL named lock around a meter write. Named locks are atomic
+     * across processes and, unlike an option row, work for the network meter
+     * too (the site meta table has no unique key to make an add atomic).
+     * Returns the lock name, or null when no lock could be taken; the write
+     * then goes ahead unlocked (fail open on bookkeeping).
+     */
+    private function lock(): ?string
+    {
+        global $wpdb;
+        if (!is_object($wpdb) || !method_exists($wpdb, 'get_var') || !method_exists($wpdb, 'prepare')) {
+            return null;
         }
-        return (bool) $ok;
+        $prefix = isset($wpdb->prefix) && is_string($wpdb->prefix) ? $wpdb->prefix : '';
+        if ($this->network && isset($wpdb->base_prefix) && is_string($wpdb->base_prefix)) {
+            $prefix = $wpdb->base_prefix;
+        }
+        $name = 'newsapi_pull_meter_' . md5($prefix . ($this->network ? '|network' : '|site'));
+        $got = $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, %d)', $name, 5));
+        if ((string) $got !== '1') {
+            $this->logger->debug('Quota meter lock not taken; the meter write goes ahead without it.');
+            return null;
+        }
+        return $name;
+    }
+
+    private function unlock(string $name): void
+    {
+        global $wpdb;
+        $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $name));
     }
 
     /**
@@ -240,6 +313,7 @@ final class Meter
      */
     private function load(): array
     {
+        OptionCache::forget(self::OPTION, $this->network);
         $value = $this->network ? get_site_option(self::OPTION, []) : get_option(self::OPTION, []);
         return is_array($value) ? $value : [];
     }
