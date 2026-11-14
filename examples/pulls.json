@@ -1,0 +1,25 @@
+{
+    "newsapi_pull_export": 1,
+    "pulls": [
+        {
+            "slug": "world-business",
+            "endpoint": "headlines",
+            "country": "gb",
+            "category": "business",
+            "page_size": 20,
+            "interval": 60,
+            "status": "draft"
+        },
+        {
+            "slug": "monsoon-search",
+            "endpoint": "everything",
+            "q": "monsoon AND (rainfall OR forecast)",
+            "search_in": ["title", "description"],
+            "language": "en",
+            "sort_by": "publishedAt",
+            "page_size": 50,
+            "interval": 120,
+            "status": "pending"
+        }
+    ]
+}
