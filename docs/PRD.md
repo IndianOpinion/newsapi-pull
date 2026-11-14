@@ -65,7 +65,7 @@ Non-goals:
 - Fetching or scraping the article page, full-text extraction, or bypassing
   the API's truncation of the `content` field.
 - Downloading or sideloading the article image into the media library by
-  default (4.8, case 64).
+  default (4.8, case 81).
 - Search-engine autoblogging, retail product feeds, or any data source other
   than NewsAPI.org.
 - Integration with, or adapters for, any third-party importer plugin.
@@ -138,7 +138,7 @@ run; an invalid pull is never sent.
    with the country list the public documentation gives for the sources
    endpoint. The documentation for the headlines endpoint currently lists
    fewer countries; a country that returns no articles is reported as an
-   empty run (case 28), not an error.
+   empty run (zero articles in the run summary), not an error.
 8. **Category**: one of `business`, `entertainment`, `general`, `health`,
    `science`, `sports`, `technology`, or empty. Valid only for `headlines`.
 9. **Sources**: a list of NewsAPI.org source ids, at most 20 (the documented
@@ -694,6 +694,24 @@ pulls. The settings page offers one example pull (headlines, category
 The defaults are chosen so a `developer` key with one hourly pull uses 24 of
 100 requests a day, leaving room for manual runs and the catalogue.
 
+### 7.1 README content
+
+The README the builder ships must contain, in its first section, the exact
+line "Written from scratch; not derived from any third-party plugin.", and
+one sentence saying the project came out of the work on indianopinion.org,
+is written from scratch, and is independent of and not affiliated with any
+third-party service it integrates with. The README must also state, in a
+section headed "Free tier and drafts":
+
+- The free tier fetches only when the WordPress environment type is `local`
+  or `development`. On `staging` or `production` a `developer` plan never
+  runs, and no setting, filter, constant, WP-CLI flag or button changes that.
+  Only plan `paid` fetches elsewhere (4.2).
+- Every article becomes a draft (or a pending item). The plugin never
+  publishes, schedules or posts anything, and no setting or filter can make
+  it do so (4.8, cases 21, 76 and 84).
+- A draft is a lead for an editor, not an article to publish as is.
+
 ## 8. Security and privacy
 
 - The API key is stored in a constant or in a non-autoloaded option. It is
@@ -972,6 +990,10 @@ Security:
 - T96 (section 8): the stored key is never present in rendered admin HTML; the field
   shows the last four characters only.
 - T97 (section 8): import of a pull JSON containing a key field ignores it.
+- T98 (7.1): the README contains the exact "Written from scratch" line, the
+  independence sentence, and the "Free tier and drafts" section with the
+  environment rule and the drafts-only rule; checked by a test that reads the
+  file.
 
 ## 13. Open questions
 
@@ -1026,13 +1048,17 @@ To be answered by the builder in `docs/ARCHITECTURE.md`.
    runs out early without warning.
 10. The provider's quota error is the final word. When the API says the
     quota is gone, stop for the day, whatever your own count says.
-11. Respect the plan. A free key belongs on a development box; refuse to run
-    it anywhere else rather than hope nobody notices.
+11. Respect the plan. A free key belongs on a development box. Fetch only
+    when the environment type is `local` or `development`, and refuse
+    everywhere else rather than hope nobody notices. Let filters make this
+    check stricter, never looser, and give it no override flag.
 12. Keep the source on every draft. The publisher name, the original link
     and the data provider's credit go in the draft from the start, so an
     editor cannot lose them by accident.
-13. Nothing publishes on its own. Enforce draft status after every filter
-    and after the insert, because other code can change it.
+13. Nothing publishes on its own. Every item is a draft or a pending item
+    for an editor. Enforce that status after every filter and after the
+    insert, because other code can change it, and let no setting or filter
+    allow a published state.
 14. Write state once per run, not once per item. Per-item option writes turn
     a busy run into a write storm.
 15. Back off after the first database error; do not issue one failing query
