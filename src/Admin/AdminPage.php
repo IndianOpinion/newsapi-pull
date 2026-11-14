@@ -178,7 +178,7 @@ final class AdminPage
         $data['source_tag'] = !empty($post['source_tag']);
         $pull = PullDefinition::fromArray($data);
         $errors = $pull->validate($this->plugin->settings->plan());
-        if ($original === '' && $pull->slug !== '' && $this->plugin->pulls->get($pull->slug) !== null) {
+        if ($pull->slug !== '' && $pull->slug !== $original && $this->plugin->pulls->get($pull->slug) !== null) {
             $errors['slug'] = 'A pull with this slug already exists.';
         }
         if ($errors !== []) {
@@ -678,15 +678,16 @@ final class AdminPage
         echo '</tbody></table>';
         submit_button('Save pull');
         echo '</form>';
-        $this->renderPicker((array) $values['sources']);
+        $this->renderPicker((array) $values['sources'], $pull !== null ? $slug : '');
     }
 
     /**
      * The source picker: lists the cached catalogue with filters.
      *
      * @param array<mixed> $selected
+     * @param string $slug The pull being edited, kept when the picker is filtered.
      */
-    private function renderPicker(array $selected): void
+    private function renderPicker(array $selected, string $slug = ''): void
     {
         // phpcs:disable WordPress.Security.NonceVerification.Recommended
         $country = isset($_GET['f_country']) && is_string($_GET['f_country']) ? sanitize_key($_GET['f_country']) : '';
@@ -708,6 +709,9 @@ final class AdminPage
             PullDefinition::MAX_SOURCES
         );
         echo '<form method="get"><input type="hidden" name="page" value="' . esc_attr(self::SLUG) . '"><input type="hidden" name="view" value="edit">';
+        if ($slug !== '') {
+            printf('<input type="hidden" name="pull" value="%s">', esc_attr($slug));
+        }
         foreach (['f_country' => $country, 'f_language' => $language, 'f_category' => $category] as $name => $value) {
             printf('<input type="text" name="%s" value="%s" placeholder="%s" class="small-text"> ', esc_attr($name), esc_attr($value), esc_attr(substr($name, 2)));
         }

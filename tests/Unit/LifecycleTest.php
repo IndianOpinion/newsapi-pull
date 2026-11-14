@@ -44,6 +44,22 @@ final class LifecycleTest extends TestCase
         self::assertFalse(wp_next_scheduled(Scheduler::HOOK, ['top']));
     }
 
+    public function testRenamingAPullOntoAnotherSlugIsRefused(): void
+    {
+        $this->configure();
+        $this->addPull(['slug' => 'one', 'country' => 'us']);
+        $this->addPull(['slug' => 'two', 'country' => 'gb']);
+        $result = $this->handle('save_pull', ['original_slug' => 'one', 'slug' => 'two', 'endpoint' => 'headlines', 'country' => 'de']);
+        self::assertFalse($result['ok']);
+        self::assertArrayHasKey('slug', $result['errors'] ?? []);
+        self::assertSame('gb', $this->plugin->pulls->get('two')?->country);
+        self::assertSame('us', $this->plugin->pulls->get('one')?->country);
+
+        $result = $this->handle('save_pull', ['original_slug' => 'one', 'slug' => 'one', 'endpoint' => 'headlines', 'country' => 'fr']);
+        self::assertTrue($result['ok']);
+        self::assertSame('fr', $this->plugin->pulls->get('one')?->country);
+    }
+
     public function testT89TooSoon(): void
     {
         $this->configure();
